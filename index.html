@@ -822,24 +822,26 @@ function logout() {
 
 // ─── API ───
 async function fetchPhotos(pageToken = '') {
-  const params = new URLSearchParams({
-    q: "mimeType contains 'image/' and trashed=false",
-    fields: 'nextPageToken,files(id,name,createdTime,imageMediaMetadata,thumbnailLink,webContentLink,webViewLink)',
-    pageSize: 100,
-    orderBy: 'createdTime desc',
-    ...(pageToken ? { pageToken } : {})
+  let url = 'https://www.googleapis.com/drive/v3/files';
+  url += '?q=' + encodeURIComponent("mimeType contains 'image/' and trashed=false");
+  url += '&fields=' + encodeURIComponent('nextPageToken,files(id,name,createdTime,imageMediaMetadata)');
+  url += '&pageSize=100';
+  url += '&orderBy=createdTime+desc';
+  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
+
+  const res = await fetch(url, {
+    headers: { Authorization: 'Bearer ' + accessToken }
   });
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  if (!res.ok) throw new Error('API error ' + res.status);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error('API error ' + res.status + ': ' + errText);
+  }
   const data = await res.json();
-  // Normalisasi format agar kompatibel dengan kode render
   const items = (data.files || []).map(f => ({
     id: f.id,
     filename: f.name,
-    baseUrl: `https://drive.google.com/thumbnail?id=${f.id}&sz=w800`,
-    fullUrl: `https://drive.google.com/uc?id=${f.id}&export=download`,
+    baseUrl: 'https://drive.google.com/thumbnail?id=' + f.id + '&sz=w800&authuser=0',
+    fullUrl: 'https://drive.google.com/file/d/' + f.id + '/view',
     mediaMetadata: {
       creationTime: f.createdTime,
       width: f.imageMediaMetadata?.width || '?',
