@@ -775,7 +775,20 @@ function checkOAuthCallback() {
   if (hash.includes('access_token')) {
     const params = new URLSearchParams(hash.slice(1));
     accessToken = params.get('access_token');
+    const expiresIn = params.get('expires_in') || 3600;
+    const expiresAt = Date.now() + (parseInt(expiresIn) * 1000);
+    sessionStorage.setItem('gp_access_token', accessToken);
+    sessionStorage.setItem('gp_expires_at', expiresAt);
     history.replaceState(null, '', window.location.pathname);
+    showApp();
+    loadPhotos();
+    return true;
+  }
+  // Coba ambil token dari sessionStorage jika masih valid
+  const saved = sessionStorage.getItem('gp_access_token');
+  const expiresAt = parseInt(sessionStorage.getItem('gp_expires_at') || '0');
+  if (saved && Date.now() < expiresAt) {
+    accessToken = saved;
     showApp();
     loadPhotos();
     return true;
@@ -801,6 +814,8 @@ function logout() {
   demoMode = false;
   allPhotos = [];
   filteredPhotos = [];
+  sessionStorage.removeItem('gp_access_token');
+  sessionStorage.removeItem('gp_expires_at');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
 }
