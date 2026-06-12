@@ -546,9 +546,12 @@
       <label>Google OAuth 2.0 Client ID</label>
       <input type="text" id="client-id-input" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"/>
       <p class="help-text">
-        Buat Client ID di <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a> dengan tipe <strong>Web Application</strong> dan aktifkan <strong>Photos Library API</strong>.
-        Tambahkan <code>https://your-domain</code> ke Authorized Origins.
+        Buat Client ID di <a href="https://console.cloud.google.com/apis/credentials?project=foto-499204" target="_blank">Google Cloud Console</a> → tipe <strong>Web Application</strong> → daftarkan URI di bawah ke <strong>Authorized redirect URIs</strong>.
       </p>
+      <div style="margin-top:10px;background:#f1f3f4;border-radius:8px;padding:8px 12px;">
+        <p style="font-size:11px;color:#5f6368;margin-bottom:4px;font-weight:500;text-transform:uppercase;">URI yang harus didaftarkan:</p>
+        <code id="show-redirect-uri" style="font-size:12px;color:#1a73e8;word-break:break-all;">memuat...</code>
+      </div>
     </div>
 
     <button class="btn-google-login" onclick="startOAuth()">
@@ -746,6 +749,10 @@ const demoAlbums = [
 ];
 
 // ─── AUTH ───
+function getRedirectUri() {
+  return window.location.origin + window.location.pathname;
+}
+
 function startOAuth() {
   const clientId = document.getElementById('client-id-input').value.trim();
   if (!clientId) { showNotif('Masukkan Client ID terlebih dahulu'); return; }
@@ -753,10 +760,13 @@ function startOAuth() {
     showNotif('Format Client ID tidak valid');
     return;
   }
-  const redirectUri = window.location.origin + window.location.pathname;
-  const scope = encodeURIComponent('https://www.googleapis.com/auth/photoslibrary.readonly');
+  const redirectUri = getRedirectUri();
+  const uriBox = document.getElementById('redirect-uri-info');
+  if (uriBox) { uriBox.textContent = redirectUri; uriBox.parentElement.style.display = 'block'; }
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.photos.readonly');
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
   sessionStorage.setItem('gp_client_id', clientId);
+  sessionStorage.setItem('gp_redirect_uri', redirectUri);
   window.location.href = url;
 }
 
@@ -797,20 +807,47 @@ function logout() {
 
 // ─── API ───
 async function fetchPhotos(pageToken = '') {
-  const url = `https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=100${pageToken ? '&pageToken=' + pageToken : ''}`;
-  const res = await fetch(url, {
+  const params = new URLSearchParams({
+    q: "mimeType contains 'image/' and trashed=false",
+    fields: 'nextPageToken,files(id,name,createdTime,imageMediaMetadata,thumbnailLink,webContentLink,webViewLink)',
+    pageSize: 100,
+    orderBy: 'createdTime desc',
+    ...(pageToken ? { pageToken } : {})
+  });
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   if (!res.ok) throw new Error('API error ' + res.status);
-  return res.json();
+  const data = await res.json();
+  // Normalisasi format agar kompatibel dengan kode render
+  const items = (data.files || []).map(f => ({
+    id: f.id,
+    filename: f.name,
+    baseUrl: `https://drive.google.com/thumbnail?id=${f.id}&sz=w800`,
+    fullUrl: `https://drive.google.com/uc?id=${f.id}&export=download`,
+    mediaMetadata: {
+      creationTime: f.createdTime,
+      width: f.imageMediaMetadata?.width || '?',
+      height: f.imageMediaMetadata?.height || '?',
+      photo: { cameraMake: f.imageMediaMetadata?.cameraModel || 'Google Drive' }
+    }
+  }));
+  return { mediaItems: items, nextPageToken: data.nextPageToken };
 }
 
 async function fetchAlbums() {
-  const res = await fetch('https://photoslibrary.googleapis.com/v1/albums?pageSize=50', {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?q=mimeType%3D%27application%2Fvnd.google-apps.folder%27%20and%20trashed%3Dfalse&fields=files(id%2Cname%2CcreatedTime)&pageSize=50', {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   if (!res.ok) throw new Error('API error ' + res.status);
-  return res.json();
+  const data = await res.json();
+  const albums = (data.files || []).map(f => ({
+    id: f.id,
+    title: f.name,
+    mediaItemsCount: '?',
+    coverPhotoBaseUrl: null
+  }));
+  return { albums };
 }
 
 async function loadPhotos() {
@@ -876,7 +913,7 @@ function renderPhotos(photos) {
       <div class="empty-state">
         <span class="material-icons-round">image_not_supported</span>
         <h3>Tidak ada foto</h3>
-        <p>Google Photos kamu kosong atau tidak ada hasil pencarian.</p>
+        <p>Tidak ada foto ditemukan di Google Drive kamu.</p>
       </div>`;
     return;
   }
@@ -888,9 +925,7 @@ function renderPhotos(photos) {
     html += `<div class="photo-date-label">${date}</div>
     <div class="photo-grid">`;
     items.forEach(photo => {
-      const thumb = demoMode
-        ? photo.baseUrl
-        : photo.baseUrl + '=w400-h400-c';
+      const thumb = photo.baseUrl;
       html += `
         <div class="photo-item" onclick="openLightbox(${photo._idx})" title="${photo.filename}">
           <img src="${thumb}" alt="${photo.filename}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot;><rect width=&quot;200&quot; height=&quot;200&quot; fill=&quot;%23e0e0e0&quot;/></svg>'"/>
@@ -911,7 +946,7 @@ function renderAlbums(albums) {
       <div class="empty-state" style="grid-column:1/-1">
         <span class="material-icons-round">photo_album</span>
         <h3>Belum ada album</h3>
-        <p>Buat album di Google Photos untuk ditampilkan di sini.</p>
+        <p>Buat folder di Google Drive untuk ditampilkan sebagai album.</p>
       </div>`;
     return;
   }
@@ -975,7 +1010,7 @@ function updateLightbox() {
   if (!photo) return;
 
   const imgEl = document.getElementById('lightbox-img');
-  imgEl.src = demoMode ? photo.baseUrl : photo.baseUrl + '=w1600';
+  imgEl.src = photo.baseUrl ? photo.baseUrl.replace('sz=w800','sz=w1600') : '';
 
   const date = new Date(photo.mediaMetadata?.creationTime);
   document.getElementById('lightbox-title').textContent = photo.filename;
@@ -1008,7 +1043,7 @@ function downloadCurrent() {
   const photo = filteredPhotos[currentIndex];
   if (!photo) return;
   const a = document.createElement('a');
-  a.href = demoMode ? photo.baseUrl : photo.baseUrl + '=d';
+  a.href = photo.fullUrl || photo.baseUrl || '';
   a.download = photo.filename;
   a.target = '_blank';
   a.click();
@@ -1044,6 +1079,8 @@ document.addEventListener('keydown', e => {
 
 // ─── INIT ───
 window.addEventListener('load', () => {
+  const uriEl = document.getElementById('show-redirect-uri');
+  if (uriEl) uriEl.textContent = window.location.origin + window.location.pathname;
   if (!checkOAuthCallback()) {
     const savedId = sessionStorage.getItem('gp_client_id');
     if (savedId) document.getElementById('client-id-input').value = savedId;
