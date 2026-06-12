@@ -763,7 +763,7 @@ function startOAuth() {
   const redirectUri = getRedirectUri();
   const uriBox = document.getElementById('redirect-uri-info');
   if (uriBox) { uriBox.textContent = redirectUri; uriBox.parentElement.style.display = 'block'; }
-  const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.photos.readonly');
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.readonly');
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
   sessionStorage.setItem('gp_client_id', clientId);
   sessionStorage.setItem('gp_redirect_uri', redirectUri);
